@@ -1,4 +1,5 @@
 import csv
+import pandas
 import operator
 from models.tensorflow_model import *
 from models.keras_model import *
@@ -6,7 +7,9 @@ from models.svm import *
 from models.knn import *
 from models.decision_tree import *
 from models.decision_tree_ensemble import *
-from analysis import *
+from models.logistic_regression import LogisticRegressionModel
+from models.adaboost import AdaBoostModel
+from models.xgboost import XGBoostModel
 from visualization import *
 from sklearn.utils import shuffle
 from sklearn.model_selection import KFold
@@ -61,16 +64,20 @@ def run(train_data, test_data, features_to_keep):
     tensorflow_model = TensorFlowModel(train_x, one_hot_train_y, learning_rate, batch_size, epochs)
     keras_model = KerasModel(train_x, one_hot_train_y, learning_rate, batch_size, epochs)
     rbf_svm_model = SVMModel(train_x, train_y, kernel="rbf")
-    knn_3_model = KNeighboursModel(train_x, train_y, 3)
     tree_entropy = DecisionTreeModel(train_x, train_y, "entropy")
     tree_gini = DecisionTreeModel(train_x, train_y, "gini")
+    logistic_regression = LogisticRegressionModel(train_x, train_y)
+    adaboost = AdaBoostModel(train_x, train_y)
+    xgboost = XGBoostModel(train_x, train_y)
 
     models = {
         "TensorFlow Model": tensorflow_model,
         "Keras Model": keras_model,
         "RBF SVM Model": rbf_svm_model,
-        "3 Nearest Neighbours Model": knn_3_model,
         "Gini Decision Tree Model": tree_gini,
+        "Logistic Regression": logistic_regression,
+        "AdaBoost": adaboost,
+        "XGBoost": xgboost
     }
 
     tree_entropy.visualize_png("entropy")
@@ -81,9 +88,11 @@ def run(train_data, test_data, features_to_keep):
 if __name__ == "__main__":
     # Variables: ['Fare', 'Ticket', 'Survived', 'Pclass', 'Sex', 'Embarked', 'Name', 'PassengerId', 'Cabin', 'SibSp', 'Age', 'Parch']
 
+    # Read the data from CSV
     with open("data/train.csv") as train_csv:
         data = [row for row in csv.DictReader(train_csv)]
 
+    # Create a new feature named Prefix - contains the prefix of each name
     name_prefixes = set()
     for row in data:
         if row["Name"] != "" or row["Name"] is not None:
@@ -92,13 +101,18 @@ if __name__ == "__main__":
             if prefix is not None:
                 name_prefixes.add(prefix)
 
+    # Map which casts sex to a categorical numerical variable
     sex_map = {"male": 0, "female": 1}
+
+    # Map with all possible prefixes
     name_prefix_map = {}
     i = 0
     for prefix in name_prefixes:
         name_prefix_map[prefix] = i
         i += 1
 
+    # For each row, cast sex to numerical variable and add the new Prefix feature
+    # Ignore rows that raise an Exception (due to missin data)
     for row in data:
         try:
             row["Sex"] = sex_map[row["Sex"]]
@@ -107,16 +121,21 @@ if __name__ == "__main__":
         except Exception as e:
             pass
 
+    # Shuffle the data
     seed = 2373
     data = shuffle(data, random_state=seed)
-    n_folds = 5
 
+    # We are using 5-fold cross validation to measure the accuracy of our models
+    n_folds = 5
     kf = KFold(n_splits=n_folds)
 
+    # Dict which will hold accuracies per feature list and model
     accuracies = {}
 
+    # Feature lists that we will use for training
     features_lists = [
-        ["Sex", "Age"],
+        ["Sex", "Age", "Prefix"],
+        ["Sex", "Age", "Prefix", "SibSp"],
         ["Sex", "Age", "Pclass", "Fare"],
         ["Sex", "Age", "Pclass", "Fare", "Parch", "Prefix"],
     ]
@@ -125,6 +144,9 @@ if __name__ == "__main__":
         features_to_keep_str = ", ".join(features_to_keep)
 
         model_acc_dict = {}
+
+        # For each step of the 5-fold cross validation,
+        # train, predict and store accuracy.
         for train_data, test_data in kf.split(data):
             train_data = [data[index] for index in train_data]
             test_data = [data[index] for index in test_data]
@@ -140,6 +162,16 @@ if __name__ == "__main__":
 
         accuracies[features_to_keep_str] = model_acc_dict
 
-    for features in accuracies:
-        print("Accuracies for {}:".format(features))
-        print(sorted(accuracies[features].items()))
+    frame = pandas.DataFrame.from_dict(accuracies)
+
+    print(frame)
+
+    # Print best scoring model for each parameter list
+    for (param_list, model) in frame.idxmax(0).items():
+        print("Best scoring model for [{}] is {} with {:.2f}% accuracy.".format(param_list, model, frame[param_list][model] * 100))
+
+    print()
+
+    # Print best scoring parameter list for each model
+    for (model, param_list) in frame.idxmax(1).items():
+        print("Best scoring parameter list for {} is [{}] with {:.2f}% accuracy.".format(model, param_list, frame[param_list][model] * 100))
