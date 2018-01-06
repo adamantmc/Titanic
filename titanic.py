@@ -1,18 +1,17 @@
 import csv
 import pandas
 import operator
-from models.tensorflow_model import *
-from models.keras_model import *
-from models.svm import *
-from models.knn import *
-from models.decision_tree import *
-from models.decision_tree_ensemble import *
-from models.logistic_regression import LogisticRegressionModel
-from models.adaboost import AdaBoostModel
-from models.xgboost import XGBoostModel
-from visualization import *
+import numpy as np
+
+from xgboost import XGBClassifier
+from sklearn.svm import SVC
+from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier
+
+from sklearn.model_selection import GridSearchCV
+
 from sklearn.utils import shuffle
 from sklearn.model_selection import KFold
+from sklearn import preprocessing, metrics
 
 def one_hot(values, classes):
     vectors = np.zeros(shape=(len(values), classes))
@@ -50,40 +49,64 @@ def get_name_prefix(name):
 # histogram(data, "SibSp", float)
 # bar_chart(data, "Age", float)
 
-def run(train_data, test_data, features_to_keep):
+def run(train_data, features_to_keep):
     train_x, train_y = get_data_vectors(train_data, features_to_keep)
-    test_x, test_y = get_data_vectors(test_data, features_to_keep)
     one_hot_train_y = one_hot(train_y, 2)
 
-    # train_x, test_x = variance_kbest(train_x, train_y, test_x, k=5)
+    train_x = preprocessing.scale(train_x)
 
-    learning_rate = 0.001
-    batch_size = 16
-    epochs = 20
+    # tensorflow_model = TensorFlowModel(learning_rate, batch_size, epochs)
+    # rbf_svm_model = SVMModel(train_x, train_y, kernel="rbf")
+    # xgboost = XGBoostModel(train_x, train_y)
+    # ensemble = DecisionTreeEnsemble(train_x, train_y)
 
-    tensorflow_model = TensorFlowModel(train_x, one_hot_train_y, learning_rate, batch_size, epochs)
-    keras_model = KerasModel(train_x, one_hot_train_y, learning_rate, batch_size, epochs)
-    rbf_svm_model = SVMModel(train_x, train_y, kernel="rbf")
-    tree_entropy = DecisionTreeModel(train_x, train_y, "entropy")
-    tree_gini = DecisionTreeModel(train_x, train_y, "gini")
-    logistic_regression = LogisticRegressionModel(train_x, train_y)
-    adaboost = AdaBoostModel(train_x, train_y)
-    xgboost = XGBoostModel(train_x, train_y)
-
-    models = {
-        "TensorFlow Model": tensorflow_model,
-        "Keras Model": keras_model,
-        "RBF SVM Model": rbf_svm_model,
-        "Gini Decision Tree Model": tree_gini,
-        "Logistic Regression": logistic_regression,
-        "AdaBoost": adaboost,
-        "XGBoost": xgboost
+    svm_parameters = {
+        "kernel": ["rbf", "linear"],
+        "C": [0.01, 0.1, 1.0, 10.0, 100.0]
     }
 
-    tree_entropy.visualize_png("entropy")
-    tree_gini.visualize_png("gini")
+    ensemble_parameters = {
+        "criterion": ["gini", "entropy"],
+        "n_estimators": [10, 20, 50, 75, 100]
+    }
 
-    return [(model, models[model].accuracy(test_x, test_y)) for model in models]
+    adaboost_parameters = {
+        "n_estimators": [10, 20, 50, 75, 100],
+        "learning_rate": [0.001, 0.01, 0.1, 1.0,]
+    }
+
+    xgboost_parameters = {
+        "max_depth": [4, 8, 12, 16, 20]
+    }
+
+    scores = ["accuracy", "precision", "recall", "f1"]
+    models = {
+        "xgboost": GridSearchCV(XGBClassifier(), xgboost_parameters, cv=5, scoring=scores, refit="accuracy"),
+        "adaboost": GridSearchCV(AdaBoostClassifier(), adaboost_parameters, cv=5, scoring=scores, refit="accuracy"), # Neural Net on TensorFlow
+        "random_forests": GridSearchCV(RandomForestClassifier(), ensemble_parameters, cv=5, scoring=scores, refit="accuracy"), # Random Forests
+        "svm": GridSearchCV(SVC(), svm_parameters, cv=5, scoring=scores, refit="accuracy") # SVM
+    }
+
+    for model in models:
+        models[model].fit(train_x, train_y)
+        for score in scores:
+            mean_accuracies = models[model].cv_results_['mean_test_accuracy']
+            mean_precision = models[model].cv_results_['mean_test_precision']
+            mean_recall = models[model].cv_results_['mean_test_recall']
+            mean_f1 = models[model].cv_results_['mean_test_f1']
+            for acc, prec, rec, f1, params in zip(mean_accuracies, mean_precision, mean_recall, mean_f1, models[model].cv_results_['params']):
+                print("{} (Accuracy: {}, Precision: {}, Recall: {}, F1: {}) for {}".format(model, acc, prec, rec, f1, params))
+            print("=====================================")
+
+    # return results
+
+    # models = {
+    #     "TensorFlow Model": tensorflow_model,
+    #     "RBF SVM Model": rbf_svm_model,
+    #     "XGBoost": xgboost
+    # }
+
+    # return [(model, models[model].accuracy(test_x, test_y)) for model in models]
 
 if __name__ == "__main__":
     # Variables: ['Fare', 'Ticket', 'Survived', 'Pclass', 'Sex', 'Embarked', 'Name', 'PassengerId', 'Cabin', 'SibSp', 'Age', 'Parch']
@@ -125,53 +148,12 @@ if __name__ == "__main__":
     seed = 2373
     data = shuffle(data, random_state=seed)
 
-    # We are using 5-fold cross validation to measure the accuracy of our models
-    n_folds = 5
-    kf = KFold(n_splits=n_folds)
-
     # Dict which will hold accuracies per feature list and model
     accuracies = {}
 
     # Feature lists that we will use for training
     features_lists = [
-        ["Sex", "Age", "Prefix"],
-        ["Sex", "Age", "Prefix", "SibSp"],
-        ["Sex", "Age", "Pclass", "Fare"],
-        ["Sex", "Age", "Pclass", "Fare", "Parch", "Prefix"],
+        ["Sex", "Age", "Pclass", "Fare", "Parch", "SibSp", "Prefix"],
     ]
 
-    for features_to_keep in features_lists:
-        features_to_keep_str = ", ".join(features_to_keep)
-
-        model_acc_dict = {}
-
-        # For each step of the 5-fold cross validation,
-        # train, predict and store accuracy.
-        for train_data, test_data in kf.split(data):
-            train_data = [data[index] for index in train_data]
-            test_data = [data[index] for index in test_data]
-            results = run(train_data, test_data, features_to_keep)
-
-            for tup in results:
-                if tup[0] not in model_acc_dict:
-                    model_acc_dict[tup[0]] = 0
-                model_acc_dict[tup[0]] += tup[1]
-
-        for model in model_acc_dict:
-            model_acc_dict[model] /= n_folds
-
-        accuracies[features_to_keep_str] = model_acc_dict
-
-    frame = pandas.DataFrame.from_dict(accuracies)
-
-    print(frame)
-
-    # Print best scoring model for each parameter list
-    for (param_list, model) in frame.idxmax(0).items():
-        print("Best scoring model for [{}] is {} with {:.2f}% accuracy.".format(param_list, model, frame[param_list][model] * 100))
-
-    print()
-
-    # Print best scoring parameter list for each model
-    for (model, param_list) in frame.idxmax(1).items():
-        print("Best scoring parameter list for {} is [{}] with {:.2f}% accuracy.".format(model, param_list, frame[param_list][model] * 100))
+    run(data, features_lists[0])
