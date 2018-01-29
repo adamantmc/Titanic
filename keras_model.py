@@ -6,6 +6,11 @@ import numpy as np
 
 class KerasModel(BaseEstimator, ClassifierMixin):
 
+    """
+    Class that implements a neural network in Keras, implementing a
+    scikit estimator for use in GridSearchCV.
+    """
+
     def __init__(self, learning_rate=0.001,
                  batch_size=64, epochs=20,
                  layers=[256],

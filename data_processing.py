@@ -1,17 +1,9 @@
 import csv
 import numpy as np
 
-def one_hot(values, classes):
-    vectors = np.zeros(shape=(len(values), classes))
-
-    i = 0
-    for value in values:
-        vectors[i][value] = 1
-        i += 1
-
-    return vectors
-
 def get_data_vectors(data, features_to_keep=None):
+    # Convert data to x, y vectors, ignoring missing values
+
     data_vectors = []
     data_answers = []
     for row in data:
@@ -26,6 +18,7 @@ def get_data_vectors(data, features_to_keep=None):
     return data_vectors, data_answers
 
 def get_data(data_file):
+    # Get data from CSV file, process them and return
     data = read_data(data_file)
     return process_data(data)
 
@@ -37,9 +30,13 @@ def read_data(data_file):
     return data
 
 def get_name_prefix(name):
+
+    # Returns the prefix of a name
+
     tokens = name.split()
 
     for token in tokens:
+        # Prefixes end in ., like Mrs. Smith
         if token[-1] == ".":
             return token
 
@@ -69,9 +66,6 @@ def process_data(data):
     for prefix in name_prefixes:
         name_prefix_map[prefix] = i
         i += 1
-
-    print(len(name_prefix_map))
-    print(name_prefix_map)
 
     # For each row, cast sex to numerical variable and add the new Prefix feature
     # Ignore rows that raise an Exception (due to missing data)
